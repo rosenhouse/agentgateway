@@ -723,6 +723,13 @@ async fn callback_rejects_invalid_transaction_state() {
 			"wrong-state",
 			Error::CsrfMismatch,
 		),
+		(
+			"csrf mismatch of equal length",
+			Some(("expected-state", TEST_NONCE, "/protected")),
+			"tx-1",
+			"expected-stata",
+			Error::CsrfMismatch,
+		),
 	];
 
 	for (name, transaction, transaction_id, callback_csrf_state, expected_error) in cases {

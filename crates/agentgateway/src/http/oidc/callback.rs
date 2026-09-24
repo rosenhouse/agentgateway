@@ -1,8 +1,8 @@
-use aws_lc_rs::constant_time::verify_slices_are_equal;
 use base64::Engine;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use subtle::ConstantTimeEq;
 use tracing::debug;
 
 use super::session::{
@@ -186,5 +186,5 @@ fn with_query(uri: &super::ProviderEndpoint, params: &[(&str, String)]) -> Strin
 }
 
 fn constant_time_str_eq(expected: &str, actual: &str) -> bool {
-	verify_slices_are_equal(expected.as_bytes(), actual.as_bytes()).is_ok()
+	expected.as_bytes().ct_eq(actual.as_bytes()).into()
 }
