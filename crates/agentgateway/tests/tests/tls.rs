@@ -414,6 +414,7 @@ async fn tls_backend_version_with_alpn() {
 	assert_eq!(read_body(res.into_body()).await.version, Version::HTTP_11);
 }
 
+#[cfg(feature = "crypto-aws-lc")]
 async fn send_http_version(t: &TestBind, v: Version) -> Response {
 	let io = if v == Version::HTTP_11 {
 		t.serve_http(strng::new("bind"))

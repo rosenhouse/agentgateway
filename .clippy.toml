@@ -8,6 +8,8 @@ disallowed-methods = [
   { path = "rustls::crypto::ring::default_provider", reason = "TLS providers must come from agentgateway::crypto::tls", allow-invalid = true },
   { path = "rustls::crypto::default_fips_provider", reason = "TLS providers must come from agentgateway::crypto::tls", allow-invalid = true },
   { path = "rustls_symcrypt::default_symcrypt_provider", reason = "TLS providers must come from agentgateway::crypto::tls", allow-invalid = true },
+  { path = "boring_rustls_provider::provider", reason = "TLS providers must come from agentgateway::crypto::tls", allow-invalid = true },
+  { path = "boring_rustls_provider::provider_with_ciphers", reason = "TLS providers must come from agentgateway::crypto::tls", allow-invalid = true },
   { path = "rustls::ConfigBuilder::with_ech", reason = "ECH changes whether a rustls client config is FIPS-compatible", allow-invalid = true },
 ]
 

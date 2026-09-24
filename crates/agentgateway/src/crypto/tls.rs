@@ -102,6 +102,12 @@ pub fn provider_with_options_validated(
 	Ok(provider_with_options(cipher_suites, key_exchange_groups))
 }
 
+/// Installs [`provider`] as the rustls process default, unless one is already set.
+#[cfg(feature = "crypto-boring")]
+pub(crate) fn install_process_default() {
+	let _ = CryptoProvider::install_default(Arc::unwrap_or_clone(provider()));
+}
+
 /// Verifies the default provider actually operates in FIPS mode, and fails closed
 /// if not. Called from [`crate::crypto::init`] at startup: a build that links the
 /// FIPS module but assembles a provider containing a non-approved suite or group is
@@ -109,6 +115,9 @@ pub fn provider_with_options_validated(
 #[cfg(feature = "fips")]
 pub fn assert_fips_provider() {
 	panic_unless_fips(&provider());
+	if let Some(installed) = CryptoProvider::get_default() {
+		panic_unless_fips(installed);
+	}
 }
 
 /// Panics unless `provider` operates in FIPS mode, naming what disqualified it.
@@ -148,12 +157,23 @@ fn default_crypto_provider() -> CryptoProvider {
 	rustls_symcrypt::default_symcrypt_provider()
 }
 
+// With `fips`, this panics unless BoringSSL runs in FIPS mode.
+#[cfg(feature = "crypto-boring")]
+fn default_crypto_provider() -> CryptoProvider {
+	boring_rustls_provider::provider()
+}
+
+#[cfg(feature = "crypto-boring")]
+pub(crate) fn backend_kx_groups() -> Vec<&'static dyn rustls::crypto::SupportedKxGroup> {
+	default_crypto_provider().kx_groups
+}
+
 #[cfg(test)]
 mod tests {
 	use crate::transport::tls::{CipherSuite, KeyExchangeGroup};
 
 	// Exercises the compiled-in backend's provider construction and the
-	// cipher-suite / kx-group mappings (aws-lc-rs or SymCrypt).
+	// cipher-suite / kx-group mappings.
 	#[test]
 	fn provider_has_default_suites_and_kx() {
 		let p = super::provider();
@@ -236,6 +256,103 @@ mod tests {
 			cfg.fips(),
 			"TLS 1.2 config must satisfy FIPS via Extended Master Secret"
 		);
+	}
+
+	#[test]
+	fn cipher_suites_map_to_matching_rustls_suites() {
+		use rustls::CipherSuite as R;
+		for (ours, theirs) in [
+			(
+				CipherSuite::TLS_AES_256_GCM_SHA384,
+				R::TLS13_AES_256_GCM_SHA384,
+			),
+			(
+				CipherSuite::TLS_AES_128_GCM_SHA256,
+				R::TLS13_AES_128_GCM_SHA256,
+			),
+			(
+				CipherSuite::TLS_CHACHA20_POLY1305_SHA256,
+				R::TLS13_CHACHA20_POLY1305_SHA256,
+			),
+			(
+				CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				R::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			),
+			(
+				CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				R::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			),
+			(
+				CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+				R::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+			),
+			(
+				CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				R::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			),
+			(
+				CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				R::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			),
+			(
+				CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+				R::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+			),
+		] {
+			assert_eq!(ours.to_supported_cipher_suite().suite(), theirs, "{ours:?}");
+		}
+	}
+
+	// SymCrypt has no ML-KEM and substitutes X25519.
+	#[cfg(not(feature = "crypto-symcrypt"))]
+	#[test]
+	fn key_exchange_groups_map_to_matching_named_groups() {
+		use rustls::NamedGroup as N;
+		for (ours, theirs) in [
+			(KeyExchangeGroup::X25519, N::X25519),
+			(KeyExchangeGroup::P256, N::secp256r1),
+			(KeyExchangeGroup::P384, N::secp384r1),
+			(KeyExchangeGroup::X25519_MLKEM768, N::X25519MLKEM768),
+		] {
+			assert_eq!(ours.to_supported_kx_group().name(), theirs, "{ours:?}");
+		}
+	}
+
+	#[test]
+	fn default_cipher_suites() {
+		use rustls::CipherSuite as R;
+		let suites: Vec<_> = super::provider()
+			.cipher_suites
+			.iter()
+			.map(|s| s.suite())
+			.collect();
+		assert_eq!(
+			suites,
+			[
+				R::TLS13_AES_256_GCM_SHA384,
+				R::TLS13_AES_128_GCM_SHA256,
+				R::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				R::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				R::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				R::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			]
+		);
+	}
+
+	#[cfg(not(feature = "crypto-symcrypt"))]
+	#[test]
+	fn default_key_exchange_groups() {
+		use rustls::NamedGroup as N;
+		let groups: Vec<_> = super::provider()
+			.kx_groups
+			.iter()
+			.map(|g| g.name())
+			.collect();
+		#[cfg(not(feature = "fips"))]
+		let expected = [N::X25519, N::secp256r1, N::secp384r1, N::X25519MLKEM768];
+		#[cfg(feature = "fips")]
+		let expected = [N::secp256r1, N::secp384r1, N::X25519MLKEM768];
+		assert_eq!(groups, expected);
 	}
 
 	#[test]

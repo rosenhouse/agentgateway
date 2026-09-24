@@ -29,6 +29,8 @@ impl DatabasePool {
 			"database maxConnections must be greater than zero"
 		);
 		if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+			#[cfg(feature = "crypto-boring")]
+			require_plaintext_postgres(url)?;
 			let pool = PgPoolOptions::new()
 				.max_connections(max_connections)
 				.connect(url)
@@ -50,5 +52,38 @@ impl DatabasePool {
 			.await
 			.context("failed to connect sqlite database")?;
 		Ok(Self::Sqlite(pool))
+	}
+}
+
+/// This build has no Postgres TLS. sqlx's default `sslmode=prefer` would then
+/// fall back to plaintext silently, so plaintext must be requested explicitly.
+#[cfg(feature = "crypto-boring")]
+fn require_plaintext_postgres(url: &str) -> anyhow::Result<()> {
+	use sqlx::postgres::{PgConnectOptions, PgSslMode};
+	let options: PgConnectOptions = url
+		.parse()
+		.context("failed to parse postgres database URL")?;
+	anyhow::ensure!(
+		matches!(options.get_ssl_mode(), PgSslMode::Disable),
+		"this build has no Postgres TLS support; set sslmode=disable to connect without TLS"
+	);
+	Ok(())
+}
+
+#[cfg(all(test, feature = "crypto-boring"))]
+mod tests {
+	use super::{DatabasePool, require_plaintext_postgres};
+
+	#[tokio::test]
+	async fn postgres_requires_explicit_plaintext() {
+		// The explicit `prefer` overrides any PGSSLMODE in the environment.
+		let err = DatabasePool::connect("postgres://user@127.0.0.1:1/db?sslmode=prefer")
+			.await
+			.expect_err("TLS is unavailable");
+		assert!(format!("{err:#}").contains("sslmode=disable"), "{err:#}");
+		require_plaintext_postgres("postgres://user@127.0.0.1:1/db?sslmode=require")
+			.expect_err("TLS is unavailable");
+		require_plaintext_postgres("postgres://user@127.0.0.1:1/db?sslmode=disable")
+			.expect("plaintext was requested");
 	}
 }

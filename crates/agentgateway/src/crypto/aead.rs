@@ -138,6 +138,78 @@ mod imp {
 	}
 }
 
+#[cfg(feature = "crypto-boring")]
+mod imp {
+	use boring::aead::{AeadCtx, Algorithm};
+
+	use super::{AeadError, NONCE_LEN};
+
+	const TAG_LEN: usize = 16;
+
+	/// AES-256-GCM backed by BoringSSL.
+	///
+	/// Sealing uses `EVP_aead_aes_256_gcm_randnonce`, which generates the nonce
+	/// inside the FIPS module, as FIPS 140-3 requires for an approved seal. It
+	/// emits `ciphertext || tag || nonce`; this type converts to and from the
+	/// shared `nonce || ciphertext || tag` framing.
+	pub struct Aes256Gcm {
+		ctx: AeadCtx,
+	}
+
+	impl Aes256Gcm {
+		/// Creates an AES-256-GCM key from 32 bytes of key material.
+		pub fn new(key: &[u8]) -> Result<Self, AeadError> {
+			// SAFETY: the function returns a pointer to a static `EVP_AEAD`.
+			let algorithm = unsafe { Algorithm::from_ptr(boring_sys::EVP_aead_aes_256_gcm_randnonce()) };
+			let ctx = AeadCtx::new_default_tag(&algorithm, key).map_err(|_| AeadError::InvalidKey)?;
+			Ok(Self { ctx })
+		}
+
+		/// Seals `plaintext`, returning `nonce || ciphertext || tag`.
+		pub fn seal(&self, plaintext: &[u8]) -> Result<Vec<u8>, AeadError> {
+			let mut buffer = plaintext.to_vec();
+			let mut tag_and_nonce = [0u8; TAG_LEN + NONCE_LEN];
+			let written = self
+				.ctx
+				.seal_in_place(&[], &mut buffer, &mut tag_and_nonce, &[])
+				.map_err(|_| AeadError::EncryptionFailed)?;
+			if written.len() != TAG_LEN + NONCE_LEN {
+				return Err(AeadError::EncryptionFailed);
+			}
+			let (tag, nonce) = tag_and_nonce.split_at(TAG_LEN);
+			let mut result = Vec::with_capacity(NONCE_LEN + buffer.len() + TAG_LEN);
+			result.extend_from_slice(nonce);
+			result.extend_from_slice(&buffer);
+			result.extend_from_slice(tag);
+			Ok(result)
+		}
+
+		/// Opens data framed as `nonce || ciphertext || tag`, returning the plaintext.
+		pub fn open(&self, data: &[u8]) -> Result<Vec<u8>, AeadError> {
+			if data.len() < NONCE_LEN + TAG_LEN {
+				return Err(AeadError::InvalidFormat);
+			}
+			let (nonce, rest) = data.split_at(NONCE_LEN);
+			let (ciphertext, tag) = rest.split_at(rest.len() - TAG_LEN);
+			let mut tag_and_nonce = [0u8; TAG_LEN + NONCE_LEN];
+			tag_and_nonce[..TAG_LEN].copy_from_slice(tag);
+			tag_and_nonce[TAG_LEN..].copy_from_slice(nonce);
+			let mut buffer = ciphertext.to_vec();
+			self
+				.ctx
+				.open_in_place(&[], &mut buffer, &tag_and_nonce, &[])
+				.map_err(|_| AeadError::DecryptionFailed)?;
+			Ok(buffer)
+		}
+	}
+
+	impl std::fmt::Debug for Aes256Gcm {
+		fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+			f.debug_struct("Aes256Gcm").finish_non_exhaustive()
+		}
+	}
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AeadError {
 	#[error("invalid key")]
@@ -160,6 +232,28 @@ mod tests {
 		let sealed = key.seal(b"hello world").expect("seal");
 		assert_ne!(sealed, b"hello world");
 		assert_eq!(key.open(&sealed).expect("open"), b"hello world");
+	}
+
+	// This is test case 15 of the GCM specification, framed as `nonce || ciphertext || tag`.
+	// Every backend must open data sealed by any other.
+	#[test]
+	fn opens_standard_gcm_framing() {
+		let key =
+			hex::decode("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308").expect("key");
+		let sealed = hex::decode(concat!(
+			"cafebabefacedbaddecaf888",
+			"522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa",
+			"8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662898015ad",
+			"b094dac5d93471bdec1a502270e3cc6c",
+		))
+		.expect("sealed");
+		let plaintext = hex::decode(concat!(
+			"d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72",
+			"1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255",
+		))
+		.expect("plaintext");
+		let key = Aes256Gcm::new(&key).expect("key");
+		assert_eq!(key.open(&sealed).expect("open"), plaintext);
 	}
 
 	#[test]

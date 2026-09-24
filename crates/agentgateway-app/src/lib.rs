@@ -150,7 +150,7 @@ pub fn run() -> anyhow::Result<()> {
 		}
 	}
 	// Install the process-global crypto providers for the compiled-in backend
-	// (currently the JWT provider) before any cryptographic work.
+	// before any cryptographic work.
 	agentgateway::crypto::init();
 	let args = Cli::parse();
 	match args.command {

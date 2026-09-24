@@ -76,6 +76,11 @@ aws-lc-rs = "1.18"
 # SymCrypt backend: symcrypt 0.5.1 dynamic-links the system libsymcrypt by default (requires libsymcrypt installed).
 symcrypt = "0.5.1"
 rustls-symcrypt = { version = "0.2.3", features = ["chacha", "x25519"] }
+# The `crypto-boring` feature uses these crates.
+boring = "5.2"
+boring-sys = "5.2"
+boring-rustls-provider = { version = "5.0", features = ["tls12", "mlkem"] }
+foreign-types = "0.5"
 axum = { version = "0.8", features = ["macros"] }
 axum-core = "0.5"
 axum-extra = { version = "0.12", features = ["json-lines", "typed-header"] }

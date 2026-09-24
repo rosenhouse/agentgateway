@@ -78,6 +78,16 @@ pub static DEFAULT_CIPHER_SUITES: &[SupportedCipherSuite] = &[
 	rustls_symcrypt::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 ];
 
+#[cfg(feature = "crypto-boring")]
+pub static DEFAULT_CIPHER_SUITES: &[SupportedCipherSuite] = &[
+	CipherSuite::TLS_AES_256_GCM_SHA384.to_supported_cipher_suite(),
+	CipherSuite::TLS_AES_128_GCM_SHA256.to_supported_cipher_suite(),
+	CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384.to_supported_cipher_suite(),
+	CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256.to_supported_cipher_suite(),
+	CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384.to_supported_cipher_suite(),
+	CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256.to_supported_cipher_suite(),
+];
+
 #[cfg(all(feature = "crypto-aws-lc", not(feature = "fips")))]
 pub static DEFAULT_KEY_EXCHANGE_GROUPS: &[&'static dyn SupportedKxGroup] = &[
 	KeyExchangeGroup::X25519.to_supported_kx_group(),
@@ -88,12 +98,27 @@ pub static DEFAULT_KEY_EXCHANGE_GROUPS: &[&'static dyn SupportedKxGroup] = &[
 
 // Bare X25519 is not an approved group; the AWS-LC FIPS module does report
 // X25519MLKEM768 as approved, so the hybrid PQC group stays.
-#[cfg(feature = "fips")]
+#[cfg(all(feature = "crypto-aws-lc", feature = "fips"))]
 pub static DEFAULT_KEY_EXCHANGE_GROUPS: &[&'static dyn SupportedKxGroup] = &[
 	KeyExchangeGroup::P256.to_supported_kx_group(),
 	KeyExchangeGroup::P384.to_supported_kx_group(),
 	KeyExchangeGroup::X25519_MLKEM768.to_supported_kx_group(),
 ];
+
+#[cfg(feature = "crypto-boring")]
+pub static DEFAULT_KEY_EXCHANGE_GROUPS: std::sync::LazyLock<Vec<&'static dyn SupportedKxGroup>> =
+	std::sync::LazyLock::new(|| {
+		[
+			#[cfg(not(feature = "fips"))]
+			KeyExchangeGroup::X25519,
+			KeyExchangeGroup::P256,
+			KeyExchangeGroup::P384,
+			KeyExchangeGroup::X25519_MLKEM768,
+		]
+		.iter()
+		.map(KeyExchangeGroup::to_supported_kx_group)
+		.collect()
+	});
 
 // SymCrypt has no MLKEM/PQC group; offer the classical groups only.
 #[cfg(feature = "crypto-symcrypt")]
@@ -192,6 +217,38 @@ impl CipherSuite {
 		}
 	}
 
+	#[cfg(feature = "crypto-boring")]
+	pub const fn to_supported_cipher_suite(&self) -> SupportedCipherSuite {
+		use boring_rustls_provider::{tls12, tls13};
+		use rustls::SupportedCipherSuite::{Tls12, Tls13};
+		match self {
+			// TLS 1.3 cipher suites
+			CipherSuite::TLS_AES_256_GCM_SHA384 => Tls13(&tls13::AES_256_GCM_SHA384),
+			CipherSuite::TLS_AES_128_GCM_SHA256 => Tls13(&tls13::AES_128_GCM_SHA256),
+			CipherSuite::TLS_CHACHA20_POLY1305_SHA256 => Tls13(&tls13::CHACHA20_POLY1305_SHA256),
+
+			// TLS 1.2 cipher suites
+			CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 => {
+				Tls12(&tls12::ECDHE_ECDSA_AES256_GCM_SHA384)
+			},
+			CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 => {
+				Tls12(&tls12::ECDHE_ECDSA_AES128_GCM_SHA256)
+			},
+			CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 => {
+				Tls12(&tls12::ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256)
+			},
+			CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 => {
+				Tls12(&tls12::ECDHE_RSA_AES256_GCM_SHA384)
+			},
+			CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 => {
+				Tls12(&tls12::ECDHE_RSA_AES128_GCM_SHA256)
+			},
+			CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 => {
+				Tls12(&tls12::ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256)
+			},
+		}
+	}
+
 	#[cfg(feature = "crypto-symcrypt")]
 	pub fn to_supported_cipher_suite(&self) -> SupportedCipherSuite {
 		match self {
@@ -255,6 +312,28 @@ impl KeyExchangeGroup {
 		}
 	}
 
+	#[cfg(feature = "crypto-boring")]
+	pub fn to_supported_kx_group(&self) -> &'static dyn SupportedKxGroup {
+		use rustls::NamedGroup;
+		// boring-rustls-provider does not export its groups, so find them by name.
+		static GROUPS: std::sync::LazyLock<Vec<&'static dyn SupportedKxGroup>> =
+			std::sync::LazyLock::new(crate::crypto::tls::backend_kx_groups);
+		let name = match self {
+			#[cfg(feature = "fips")]
+			KeyExchangeGroup::X25519 => return &UnavailableKxGroup(NamedGroup::X25519),
+			#[cfg(not(feature = "fips"))]
+			KeyExchangeGroup::X25519 => NamedGroup::X25519,
+			KeyExchangeGroup::P256 => NamedGroup::secp256r1,
+			KeyExchangeGroup::P384 => NamedGroup::secp384r1,
+			KeyExchangeGroup::X25519_MLKEM768 => NamedGroup::X25519MLKEM768,
+		};
+		GROUPS
+			.iter()
+			.copied()
+			.find(|g| g.name() == name)
+			.expect("boring-rustls-provider offers every other group")
+	}
+
 	#[cfg(feature = "crypto-symcrypt")]
 	pub fn to_supported_kx_group(&self) -> &'static dyn SupportedKxGroup {
 		match self {
@@ -264,6 +343,26 @@ impl KeyExchangeGroup {
 			// SymCrypt has no MLKEM; fall back to X25519.
 			KeyExchangeGroup::X25519_MLKEM768 => rustls_symcrypt::X25519,
 		}
+	}
+}
+
+/// Stands in for X25519, which boring-rustls-provider omits with `fips`. It reports
+/// `fips() == false`, so validation rejects it, and handshakes that select it fail.
+#[cfg(all(feature = "crypto-boring", feature = "fips"))]
+#[derive(Debug)]
+struct UnavailableKxGroup(rustls::NamedGroup);
+
+#[cfg(all(feature = "crypto-boring", feature = "fips"))]
+impl SupportedKxGroup for UnavailableKxGroup {
+	fn start(&self) -> Result<Box<dyn rustls::crypto::ActiveKeyExchange>, rustls::Error> {
+		Err(rustls::Error::General(format!(
+			"key exchange group {:?} is not available in this build",
+			self.0
+		)))
+	}
+
+	fn name(&self) -> rustls::NamedGroup {
+		self.0
 	}
 }
 

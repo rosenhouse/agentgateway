@@ -13,19 +13,25 @@ default = ["jemalloc", "mimalloc", "crypto-aws-lc"]
 jemalloc = ["dep:tikv-jemallocator", "dep:jemalloc_pprof"]
 mimalloc = ["pprof-alloc/allocator-mimalloc", "dep:mimalloc"]
 # Crypto provider selection. `crypto-aws-lc` (the default) backs all crypto with
-# aws-lc-rs. `fips` is an operating-mode modifier; it currently requires the
-# `crypto-aws-lc` backend and builds it against AWS-LC-FIPS (aws-lc-fips-sys).
-# The concrete AWS-LC-FIPS module is determined by the aws-lc-fips-sys version
-# resolved in Cargo.lock.
+# aws-lc-rs. `fips` is an operating-mode modifier for `crypto-aws-lc` or
+# `crypto-boring`. With `crypto-aws-lc` it builds against AWS-LC-FIPS
+# (aws-lc-fips-sys); the module is determined by the aws-lc-fips-sys version
+# resolved in Cargo.lock. With `crypto-boring` it builds the FIPS module from the
+# BoringSSL source vendored by boring-sys.
 # Note the linked module version is not necessarily CMVP-validated; check the
-# certificate for the exact AWS-LC-FIPS version before making a compliance claim.
+# certificate for the exact module version before making a compliance claim.
 # `crypto-symcrypt` routes TLS/AEAD/hash/RNG through SymCrypt and falls back to
 # aws-lc-rs for JWT and certificate issuance (no SymCrypt hook there).
+# `crypto-boring` links no aws-lc-rs and has no Postgres TLS. Its TLS runs on
+# BoringCrypto, but boring-rustls-provider does not use the module's approved
+# TLS record, TLS 1.3 key derivation and ECDH services.
 crypto-aws-lc = ["dep:aws-lc-rs", "rustls/aws_lc_rs", "tokio-rustls/aws_lc_rs", "jsonwebtoken/aws_lc_rs", "_bundled-crypto-deps"]
 # `rustls/fips` comes through aws-smithy-http-client, which only
 # `_bundled-crypto-deps` enables.
-fips = ["aws-lc-rs?/fips", "aws-smithy-http-client?/rustls-aws-lc-fips"]
+# Enabling it directly would pull aws-lc-rs into `crypto-boring`.
+fips = ["aws-lc-rs?/fips", "aws-smithy-http-client?/rustls-aws-lc-fips", "boring?/fips", "boring-rustls-provider?/fips"]
 crypto-symcrypt = ["dep:symcrypt", "dep:rustls-symcrypt", "dep:aws-lc-rs", "jsonwebtoken/aws_lc_rs", "_bundled-crypto-deps"]
+crypto-boring = ["dep:boring", "dep:boring-sys", "dep:boring-rustls-provider", "dep:foreign-types"]
 # These dependency features bundle aws-lc-rs or ring. Only `crypto-aws-lc` and
 # `crypto-symcrypt` enable them.
 _bundled-crypto-deps = [
@@ -65,6 +71,10 @@ aws-types.workspace = true
 aws-lc-rs = { workspace = true, optional = true }
 symcrypt = { workspace = true, optional = true }
 rustls-symcrypt = { workspace = true, optional = true }
+boring = { workspace = true, optional = true }
+boring-sys = { workspace = true, optional = true }
+boring-rustls-provider = { workspace = true, optional = true }
+foreign-types = { workspace = true, optional = true }
 # No code uses this crate. The `fips` feature enables `rustls/fips` through it.
 aws-smithy-http-client = { workspace = true, optional = true }
 aws-smithy-eventstream.workspace = true

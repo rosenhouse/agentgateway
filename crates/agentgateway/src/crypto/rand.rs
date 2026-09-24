@@ -33,6 +33,16 @@ mod imp {
 	}
 }
 
+#[cfg(feature = "crypto-boring")]
+mod imp {
+	use super::RandError;
+
+	/// Fills `dest` with cryptographically-secure random bytes (BoringSSL backend).
+	pub fn fill(dest: &mut [u8]) -> Result<(), RandError> {
+		boring::rand::rand_bytes(dest).map_err(|_| RandError)
+	}
+}
+
 /// Returns `len` cryptographically-secure random bytes.
 pub fn bytes(len: usize) -> Result<Vec<u8>, RandError> {
 	let mut out = vec![0u8; len];

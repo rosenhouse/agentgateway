@@ -96,6 +96,42 @@ mod imp {
 	}
 }
 
+#[cfg(feature = "crypto-boring")]
+mod imp {
+	use super::SHA256_LEN;
+
+	/// Computes the SHA-256 digest of `data` in one shot (BoringSSL backend).
+	pub fn sha256(data: &[u8]) -> [u8; SHA256_LEN] {
+		boring::sha::sha256(data)
+	}
+
+	/// Incremental SHA-256 hasher, for data supplied in multiple pieces.
+	pub struct Sha256(boring::sha::Sha256);
+
+	impl Sha256 {
+		/// Creates a new, empty SHA-256 hasher.
+		pub fn new() -> Self {
+			Self(boring::sha::Sha256::new())
+		}
+
+		/// Adds `data` to the running digest.
+		pub fn update(&mut self, data: impl AsRef<[u8]>) {
+			self.0.update(data.as_ref());
+		}
+
+		/// Consumes the hasher and returns the final digest.
+		pub fn finalize(self) -> [u8; SHA256_LEN] {
+			self.0.finish()
+		}
+	}
+
+	impl Default for Sha256 {
+		fn default() -> Self {
+			Self::new()
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::{Sha256, sha256};

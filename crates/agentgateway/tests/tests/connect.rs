@@ -2,6 +2,7 @@ use agentgateway::types::agent::{
 	BackendTarget, BindMode, PolicyInheritance, PolicyTarget, TargetedPolicy, TunnelProtocol,
 };
 use agentgateway::types::frontend;
+#[cfg(feature = "crypto-aws-lc")]
 use hyper::client::conn::http1;
 use rustls_pki_types::ServerName;
 use tokio_rustls::TlsConnector;
@@ -1214,6 +1215,7 @@ async fn connect_tunnel_dynamic_ca_obo_dynamic_backend() {
 }
 
 #[tokio::test]
+#[cfg(feature = "crypto-aws-lc")]
 async fn incoming_connect_applies_backend_tls() {
 	let (mock, certs) = tls_mock().await;
 	let backend_tls = agentgateway::http::backendtls::ResolvedBackendTLS {
