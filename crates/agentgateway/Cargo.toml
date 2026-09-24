@@ -21,9 +21,24 @@ mimalloc = ["pprof-alloc/allocator-mimalloc", "dep:mimalloc"]
 # certificate for the exact AWS-LC-FIPS version before making a compliance claim.
 # `crypto-symcrypt` routes TLS/AEAD/hash/RNG through SymCrypt and falls back to
 # aws-lc-rs for JWT and certificate issuance (no SymCrypt hook there).
-crypto-aws-lc = ["dep:aws-lc-rs", "rustls/aws_lc_rs", "tokio-rustls/aws_lc_rs", "jsonwebtoken/aws_lc_rs"]
-fips = ["aws-lc-rs?/fips", "rustls/fips", "tokio-rustls/fips"]
-crypto-symcrypt = ["dep:symcrypt", "dep:rustls-symcrypt", "dep:aws-lc-rs", "jsonwebtoken/aws_lc_rs"]
+crypto-aws-lc = ["dep:aws-lc-rs", "rustls/aws_lc_rs", "tokio-rustls/aws_lc_rs", "jsonwebtoken/aws_lc_rs", "_bundled-crypto-deps"]
+# `rustls/fips` comes through aws-smithy-http-client, which only
+# `_bundled-crypto-deps` enables.
+fips = ["aws-lc-rs?/fips", "aws-smithy-http-client?/rustls-aws-lc-fips"]
+crypto-symcrypt = ["dep:symcrypt", "dep:rustls-symcrypt", "dep:aws-lc-rs", "jsonwebtoken/aws_lc_rs", "_bundled-crypto-deps"]
+# These dependency features bundle aws-lc-rs or ring. Only `crypto-aws-lc` and
+# `crypto-symcrypt` enable them.
+_bundled-crypto-deps = [
+    "aws-config/default-https-client",
+    "dep:aws-smithy-http-client",
+    "google-cloud-auth/default-rustls-provider",
+    "dep:rcgen",
+    "rcgen/aws_lc_rs",
+    "rcgen/x509-parser",
+    "reqwest/rustls",
+    "sqlx/tls-rustls",
+    "wiremock/tls",
+]
 ui = []
 schema = ["schemars", "agent-core/schema", "agent-llm/schema"]
 internal_benches = ["divan"]
@@ -50,6 +65,8 @@ aws-types.workspace = true
 aws-lc-rs = { workspace = true, optional = true }
 symcrypt = { workspace = true, optional = true }
 rustls-symcrypt = { workspace = true, optional = true }
+# No code uses this crate. The `fips` feature enables `rustls/fips` through it.
+aws-smithy-http-client = { workspace = true, optional = true }
 aws-smithy-eventstream.workspace = true
 aws-smithy-types.workspace = true
 axum-core.workspace = true
@@ -119,7 +136,7 @@ prost.workspace = true
 rand.workspace = true
 quick_cache.workspace = true
 libc.workspace = true
-rcgen.workspace = true
+rcgen = { workspace = true, optional = true }
 regex.workspace = true
 
 rmcp = { version = "3.1.0", features = [
@@ -205,6 +222,7 @@ pprof-alloc.workspace = true
 tokio = { workspace = true }
 
 [dev-dependencies]
+rcgen = { workspace = true, features = ["aws_lc_rs", "x509-parser"] }
 # Enable the SPIFFE Workload API bindings for tests only (fake agent for SPIFFE dataplane tests).
 protos = { workspace = true, features = ["spiffe-test-server"] }
 assert_matches.workspace = true

@@ -241,6 +241,7 @@ dependencies = [
  "aws-lc-rs",
  "aws-sigv4",
  "aws-smithy-eventstream",
+ "aws-smithy-http-client",
  "aws-smithy-types",
  "aws-types",
  "axum",
