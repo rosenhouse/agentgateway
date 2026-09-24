@@ -6,7 +6,7 @@
 //! [`CRYPTO_BACKEND`]).
 //!
 //! Some operations cannot yet be routed through a pluggable backend (for
-//! example certificate generation via `rcgen`, or legacy password hashing).
+//! example legacy password hashing).
 //! Such documented exceptions must be guarded with the appropriate
 //! `#[cfg(feature = ...)]` so the backend in use stays explicit.
 
@@ -30,6 +30,7 @@ pub mod digest;
 pub mod jwt;
 pub mod rand;
 pub mod tls;
+pub mod x509;
 
 pub use tls::{provider, provider_with_options_validated};
 

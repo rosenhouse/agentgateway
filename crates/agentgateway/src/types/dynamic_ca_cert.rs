@@ -7,53 +7,14 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::anyhow;
 use quick_cache::sync::Cache;
-use rcgen::{CertificateParams, DnType, Issuer, KeyPair};
-use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use rustls::server::ResolvesServerCert;
 use rustls::sign::CertifiedKey;
 
+use crate::crypto::x509::DynamicCa;
 use crate::transport::tls;
 use crate::types::agent::{ServerTLSConfig, TLSVersion};
-
-struct DynamicCa {
-	cert_der: Vec<u8>,
-	issuer: Issuer<'static, KeyPair>,
-}
-
-impl DynamicCa {
-	fn from_pem(cert_pem: &[u8], key_pem: &[u8]) -> anyhow::Result<Self> {
-		let cert_pem_str = std::str::from_utf8(cert_pem)?;
-		let key_pem_str = std::str::from_utf8(key_pem)?;
-
-		let cert_der = CertificateDer::pem_slice_iter(cert_pem)
-			.next()
-			.ok_or_else(|| anyhow!("no certificate found in dynamic CA PEM"))?
-			.map_err(|e| anyhow!("failed to parse dynamic CA cert PEM: {e}"))?
-			.to_vec();
-
-		let key_pair = KeyPair::from_pem(key_pem_str)?;
-		let issuer = Issuer::from_ca_cert_pem(cert_pem_str, key_pair)?;
-
-		Ok(Self { cert_der, issuer })
-	}
-
-	fn generate_leaf_cert(&self, domain: &str) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-		let mut params = CertificateParams::new(vec![domain.to_string()])?;
-		params.distinguished_name.push(DnType::CommonName, domain);
-		params.is_ca = rcgen::IsCa::NoCa;
-		params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
-		params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
-		params.use_authority_key_identifier_extension = true;
-
-		let leaf_key = KeyPair::generate()?;
-		let leaf_cert = params.signed_by(&leaf_key, &self.issuer)?;
-
-		Ok((leaf_cert.der().to_vec(), leaf_key.serialize_der()))
-	}
-}
 
 #[derive(Clone)]
 struct CachedDynamicCaCert {
@@ -91,7 +52,7 @@ impl DynamicCaCertResolver {
 
 		let cert_chain = vec![
 			CertificateDer::from(leaf_der),
-			CertificateDer::from(self.ca.cert_der.clone()),
+			CertificateDer::from(self.ca.cert_der().to_vec()),
 		];
 
 		let private_key = PrivatePkcs8KeyDer::from(key_der);
@@ -202,7 +163,9 @@ pub(crate) fn build_dynamic_ca_tls_config_with_profile(
 
 #[cfg(test)]
 mod tests {
-	use rcgen::{BasicConstraints, IsCa, KeyUsagePurpose};
+	use rcgen::{
+		BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair, KeyUsagePurpose,
+	};
 	use x509_parser::extensions::ParsedExtension;
 	use x509_parser::prelude::{FromDer, X509Certificate};
 

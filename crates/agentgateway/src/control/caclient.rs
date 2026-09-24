@@ -587,19 +587,10 @@ mod csr {
 
 	impl CsrOptions {
 		pub fn generate(&self) -> anyhow::Result<CertSign> {
-			use rcgen::{CertificateParams, DistinguishedName, SanType};
-			let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
-			let private_key = kp.serialize_pem();
-			let mut params = CertificateParams::default();
-			params.subject_alt_names = vec![SanType::URI(self.san.clone().try_into()?)];
-			params.key_identifier_method = rcgen::KeyIdMethod::Sha256;
-			// Avoid setting CN. rcgen defaults it to "rcgen self signed cert" which we don't want
-			params.distinguished_name = DistinguishedName::new();
-			let csr = params.serialize_request(&kp)?.pem()?;
-
+			let csr = crate::crypto::x509::generate_csr(&self.san)?;
 			Ok(CertSign {
-				csr,
-				private_key: private_key.into(),
+				csr: csr.csr_pem,
+				private_key: csr.key_pem.into(),
 			})
 		}
 	}
