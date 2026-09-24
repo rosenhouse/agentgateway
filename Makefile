@@ -82,6 +82,29 @@ build-symcrypt: $(UI_PREREQ)
 build-fips: $(UI_PREREQ)
 	cargo build --release --no-default-features --features jemalloc,mimalloc,crypto-aws-lc,fips $(UI_FEATURE) $(CARGO_BUILD_ARGS)
 
+# Build the BoringSSL provider in FIPS mode. BoringSSL's FIPS build requires clang and Go.
+BORING_FIPS_FEATURES := jemalloc,mimalloc,crypto-boring,fips
+BORING_FIPS_TREE_ARGS := -p agentgateway-app --no-default-features --features $(BORING_FIPS_FEATURES) -e normal,build --target all
+.PHONY: build-boring-fips
+build-boring-fips: $(UI_PREREQ)
+	cargo build --release --no-default-features --features $(BORING_FIPS_FEATURES) $(UI_FEATURE) $(CARGO_BUILD_ARGS)
+
+# Fail if the BoringSSL FIPS build links aws-lc-rs or ring.
+.PHONY: check-boring-deps
+check-boring-deps:
+	@tree=$$(cargo tree --locked $(BORING_FIPS_TREE_ARGS) --prefix none) || exit 1; \
+	if echo "$$tree" | grep -E '^(aws-lc[a-z-]*|ring) '; then \
+		echo "crypto-boring must not link these. Find the path with: cargo tree -i <crate> $(BORING_FIPS_TREE_ARGS)"; \
+		exit 1; \
+	fi
+
+# Lint the BoringSSL backend. The non-FIPS build needs no Go.
+.PHONY: lint-boring
+lint-boring:
+	cargo clippy -p agentgateway -p agentgateway-app --all-targets --no-default-features \
+		--features agentgateway-app/crypto-boring,agentgateway-app/jemalloc,agentgateway-app/mimalloc \
+		-- -D clippy::disallowed_methods -D clippy::disallowed_fields
+
 # lint
 .PHONY: lint
 lint:
