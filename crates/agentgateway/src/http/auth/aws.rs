@@ -21,6 +21,9 @@ use crate::llm::bedrock::AwsRegion;
 use crate::util::ErrorContext;
 use crate::*;
 
+#[cfg(feature = "crypto-boring")]
+mod http_client;
+
 #[derive(Clone, Debug)]
 pub struct DefaultAwsServiceName(pub String);
 
@@ -743,8 +746,16 @@ fn should_sign_header(name: &str) -> bool {
 static SDK_CONFIG: OnceCell<SdkConfig> = OnceCell::const_new();
 async fn sdk_config<'a>() -> &'a SdkConfig {
 	SDK_CONFIG
-		.get_or_init(|| async { aws_config::load_defaults(BehaviorVersion::v2026_01_12()).await })
+		.get_or_init(|| async { config_loader().load().await })
 		.await
+}
+
+fn config_loader() -> aws_config::ConfigLoader {
+	let loader = aws_config::defaults(BehaviorVersion::v2026_01_12());
+	// Without aws-lc-rs, aws-config has no HTTPS client of its own.
+	#[cfg(feature = "crypto-boring")]
+	let loader = loader.http_client(http_client::http_client());
+	loader
 }
 
 async fn load_credentials(
@@ -918,6 +929,25 @@ fn credentials_valid(creds: &Credentials) -> bool {
 			.duration_since(SystemTime::now())
 			.is_ok_and(|ttl| ttl > ASSUMED_CREDENTIAL_REFRESH_BUFFER),
 		None => true,
+	}
+}
+
+// aws-lc builds use aws-config's built-in HTTPS client, which the SDK attaches
+// when it builds each client rather than storing it in the config.
+#[cfg(all(test, feature = "crypto-boring"))]
+mod config_loader_tests {
+	use aws_credential_types::Credentials;
+	use aws_types::region::Region;
+
+	#[tokio::test]
+	async fn sdk_config_has_an_https_client() {
+		crate::crypto::init();
+		let config = super::config_loader()
+			.region(Region::new("us-east-1"))
+			.credentials_provider(Credentials::new("id", "secret", None, None, "test"))
+			.load()
+			.await;
+		assert!(config.http_client().is_some());
 	}
 }
 
